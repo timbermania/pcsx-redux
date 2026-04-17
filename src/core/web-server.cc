@@ -363,6 +363,9 @@ class LuaExecutor : public PCSX::WebExecutor {
                 L.pop();
             }
             L.settable();
+            L.push("body");
+            L.push(request.body.asStringView());
+            L.settable();
             try {
                 L.pcall(1);
                 if (L.isstring()) {

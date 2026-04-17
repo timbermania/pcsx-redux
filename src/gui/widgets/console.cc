@@ -36,7 +36,7 @@ void PCSX::Widgets::Console::draw(const char* title, GUI* gui) {
     }
 
     ImGui::SameLine();
-    if (ImGui::SmallButton(_("Clear"))) m_items.clear();
+    if (ImGui::SmallButton(_("Clear"))) clear();
     ImGui::SameLine();
     bool copy_to_clipboard = ImGui::SmallButton(_("Copy"));
 

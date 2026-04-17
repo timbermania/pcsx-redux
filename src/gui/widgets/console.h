@@ -39,6 +39,16 @@ class Console {
     void addError(const std::string& str) { m_items.push_back(std::make_pair(LineType::ERRORMSG, str)); }
     void addError(std::string&& str) { m_items.push_back(std::make_pair(LineType::ERRORMSG, std::move(str))); }
 
+    void clear() { m_items.clear(); }
+    std::vector<std::pair<int, std::string>> getLinesAsStrings() const {
+        std::vector<std::pair<int, std::string>> out;
+        out.reserve(m_items.size());
+        for (const auto& item : m_items) {
+            out.emplace_back(static_cast<int>(item.first), item.second);
+        }
+        return out;
+    }
+
     void draw(const char* title, GUI* gui);
 
     bool& m_show;

@@ -25,6 +25,7 @@
 #include "core/psxmem.h"
 #include "core/r3000a.h"
 #include "core/sstate.h"
+#include "gui/gui.h"
 #include "lua/luafile.h"
 #include "lua/luawrapper.h"
 
@@ -251,6 +252,39 @@ void PCSX::LuaFFI::open_pcsx(Lua L) {
             L.push();
             L.push();
             return 3;
+        },
+        -1);
+    L.declareFunc(
+        "clearLuaConsole",
+        [](lua_State* L_) -> int {
+            if (PCSX::g_gui) PCSX::g_gui->clearLuaConsole();
+            return 0;
+        },
+        -1);
+    L.declareFunc(
+        "getLuaConsole",
+        [](lua_State* L_) -> int {
+            Lua L(L_);
+            L.newtable();
+            if (PCSX::g_gui) {
+                auto items = PCSX::g_gui->getLuaConsoleLines();
+                static const char* const kTypeNames[] = {"normal", "command", "error"};
+                lua_Number idx = 1;
+                for (const auto& item : items) {
+                    L.push(idx++);
+                    L.newtable();
+                    L.push("type");
+                    int t = item.first;
+                    if (t < 0 || t > 2) t = 0;
+                    L.push(std::string(kTypeNames[t]));
+                    L.settable();
+                    L.push("text");
+                    L.push(item.second);
+                    L.settable();
+                    L.settable();
+                }
+            }
+            return 1;
         },
         -1);
     L.pop();

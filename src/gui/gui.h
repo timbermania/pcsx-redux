@@ -229,6 +229,8 @@ class GUI final : public UI {
             m_luaConsole.addLog(msg);
         }
     }
+    void clearLuaConsole() { m_luaConsole.clear(); }
+    std::vector<std::pair<int, std::string>> getLuaConsoleLines() const { return m_luaConsole.getLinesAsStrings(); }
     class Notifier {
       public:
         Notifier(std::function<const char *()> title) : m_title(title) {}
