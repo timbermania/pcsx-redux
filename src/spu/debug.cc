@@ -21,6 +21,12 @@
 #include "imgui.h"
 #include "spu/interface.h"
 
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
 struct Grid {
     static constexpr auto FlagsColumn = ImGuiTableColumnFlags_NoResize | ImGuiTableColumnFlags_WidthFixed;
 
@@ -588,6 +594,28 @@ void impl::debug() {
     DrawSectionSpu(spuCtrl, spuStat, spuAddr, spuMemC, pSpuIrq);
     DrawSectionXa(xapGlobal, iLeftXAVol, iRightXAVol);
     DrawSectionChannels(s_chan, m_channelTag, m_channelDebugData, spuMemC);
+
+    // SPU Audio Capture controls
+    ImGui::Separator();
+    ImGui::Text("Audio Capture");
+    if (!m_capture.recording) {
+        static bool perVoice = true;
+        ImGui::Checkbox("Per-voice capture", &perVoice);
+        if (ImGui::Button("Start Capture")) {
+            std::string dir = "spu_capture";
+#ifdef _WIN32
+            _mkdir(dir.c_str());
+#else
+            mkdir(dir.c_str(), 0755);
+#endif
+            m_capture.start(dir, perVoice);
+        }
+    } else {
+        ImGui::Text("Recording... (%u samples)", m_capture.sampleCount);
+        if (ImGui::Button("Stop Capture")) {
+            m_capture.stop();
+        }
+    }
 
     ImGui::End();
 }

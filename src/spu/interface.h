@@ -21,7 +21,12 @@
 
 #include <stdint.h>
 
+#include <algorithm>
+#include <atomic>
+#include <cstdio>
+#include <fstream>
 #include <thread>
+#include <vector>
 
 #include "core/decode_xa.h"
 #include "core/spu.h"
@@ -287,6 +292,220 @@ class impl final : public SPUInterface {
     ADSR m_adsr;
     MiniAudio m_audioOut = {settings};
     xa_decode_t m_cdda;
+
+    // ===== SPU Audio Capture System =====
+    struct SpuCapture {
+        std::atomic<bool> recording{false};
+        bool capturePerVoice = false;
+        std::string outputDir;
+        int debugVoice = -1;
+
+        std::ofstream mixFile;
+        std::ofstream voiceFiles[MAXCHAN];
+        std::ofstream traceFile;
+        std::ofstream denseTraceFile;
+        std::ofstream blockTraceFile;
+        uint32_t sampleCount = 0;
+
+        struct VoiceEventState {
+            bool valid = false;
+            bool on = false;
+            bool stop = false;
+            uint16_t rawPitch = 0;
+            uint32_t startAddr = 0;
+            uint32_t loopAddr = 0;
+            uint32_t currAddr = 0;
+            int envState = -1;
+            int envVol = -1;
+        };
+
+        VoiceEventState prevVoiceEvents[MAXCHAN];
+
+        void start(const std::string& dir, bool perVoice = false, int debugVoiceIndex = -1) {
+            outputDir = dir;
+            capturePerVoice = perVoice;
+            debugVoice = debugVoiceIndex;
+            sampleCount = 0;
+            for (unsigned i = 0; i < MAXCHAN; i++) {
+                prevVoiceEvents[i] = VoiceEventState{};
+            }
+
+            mixFile.open(dir + "/spu_mix.raw", std::ios::binary);
+            traceFile.open(dir + "/spu_voice_events.jsonl", std::ios::binary);
+            if (debugVoice >= 0 && debugVoice < static_cast<int>(MAXCHAN)) {
+                denseTraceFile.open(dir + "/spu_voice_dense.jsonl", std::ios::binary);
+                blockTraceFile.open(dir + "/spu_voice_blocks.jsonl", std::ios::binary);
+            }
+
+            if (perVoice) {
+                for (unsigned i = 0; i < MAXCHAN; i++) {
+                    char name[64];
+                    snprintf(name, sizeof(name), "/spu_voice_%02u.raw", i);
+                    voiceFiles[i].open(dir + name, std::ios::binary);
+                }
+            }
+            recording = true;
+        }
+
+        void stop() {
+            recording = false;
+
+            if (traceFile.is_open()) {
+                traceFile.close();
+            }
+            if (denseTraceFile.is_open()) {
+                denseTraceFile.close();
+            }
+            if (blockTraceFile.is_open()) {
+                blockTraceFile.close();
+            }
+            if (mixFile.is_open()) {
+                mixFile.close();
+                rawToWav(outputDir + "/spu_mix.raw", outputDir + "/spu_mix.wav", 2, sampleCount);
+            }
+            if (capturePerVoice) {
+                for (unsigned i = 0; i < MAXCHAN; i++) {
+                    if (voiceFiles[i].is_open()) {
+                        voiceFiles[i].close();
+                        char rawN[64], wavN[64];
+                        snprintf(rawN, sizeof(rawN), "/spu_voice_%02u.raw", i);
+                        snprintf(wavN, sizeof(wavN), "/spu_voice_%02u.wav", i);
+                        rawToWav(outputDir + rawN, outputDir + wavN, 1, sampleCount);
+                    }
+                }
+            }
+        }
+
+        void writeVoiceEvent(unsigned ch, uint32_t sampleIndex, bool on, bool stop, uint16_t rawPitch,
+                             uint32_t startAddr, uint32_t loopAddr, uint32_t currAddr,
+                             int envState, int envVol, int16_t sample) {
+            if (!recording || !traceFile.is_open() || ch >= MAXCHAN) return;
+            auto &prev = prevVoiceEvents[ch];
+            if (prev.valid && prev.on == on && prev.stop == stop && prev.rawPitch == rawPitch &&
+                prev.startAddr == startAddr && prev.loopAddr == loopAddr && prev.currAddr == currAddr &&
+                prev.envState == envState && prev.envVol == envVol) {
+                return;
+            }
+            traceFile << "{\"kind\":\"voice_event\",\"voice\":" << ch
+                      << ",\"sample_index\":" << sampleIndex
+                      << ",\"on\":" << (on ? "true" : "false")
+                      << ",\"stop\":" << (stop ? "true" : "false")
+                      << ",\"raw_pitch\":" << rawPitch
+                      << ",\"start_addr\":" << startAddr
+                      << ",\"loop_addr\":" << loopAddr
+                      << ",\"curr_addr\":" << currAddr
+                      << ",\"env_state\":" << envState
+                      << ",\"env_vol\":" << envVol
+                      << ",\"sample\":" << sample
+                      << "}\n";
+            traceFile.flush();
+            prev.valid = true;
+            prev.on = on;
+            prev.stop = stop;
+            prev.rawPitch = rawPitch;
+            prev.startAddr = startAddr;
+            prev.loopAddr = loopAddr;
+            prev.currAddr = currAddr;
+            prev.envState = envState;
+            prev.envVol = envVol;
+        }
+
+        void writeVoiceDenseEvent(unsigned ch, uint32_t sampleIndex, int decodedSample, int interpSample, int mixedSample,
+                                  uint32_t startAddr, uint32_t loopAddr, uint32_t currAddr,
+                                  int envState, int envVol, int sbPos, uint32_t spos, int s1, int s2) {
+            if (!recording || !denseTraceFile.is_open()) return;
+            if (static_cast<int>(ch) != debugVoice) return;
+            denseTraceFile << "{\"kind\":\"voice_dense\""
+                           << ",\"voice\":" << ch
+                           << ",\"sample_index\":" << sampleIndex
+                           << ",\"decoded_sample\":" << decodedSample
+                           << ",\"interp_sample\":" << interpSample
+                           << ",\"mixed_sample\":" << mixedSample
+                           << ",\"start_addr\":" << startAddr
+                           << ",\"loop_addr\":" << loopAddr
+                           << ",\"curr_addr\":" << currAddr
+                           << ",\"env_state\":" << envState
+                           << ",\"env_vol\":" << envVol
+                           << ",\"sb_pos\":" << sbPos
+                           << ",\"spos\":" << spos
+                           << ",\"s_1\":" << s1
+                           << ",\"s_2\":" << s2
+                           << "}\n";
+        }
+
+        void writeVoiceBlock(unsigned ch, uint32_t sampleIndex, uint32_t blockAddr, const uint8_t *blockData,
+                             int inS1, int inS2, int predictNr, int shiftFactor, int flags) {
+            if (!recording || !blockTraceFile.is_open()) return;
+            if (static_cast<int>(ch) != debugVoice) return;
+            blockTraceFile << "{\"kind\":\"voice_block\""
+                           << ",\"voice\":" << ch
+                           << ",\"sample_index\":" << sampleIndex
+                           << ",\"block_addr\":" << blockAddr
+                           << ",\"predict\":" << predictNr
+                           << ",\"shift\":" << shiftFactor
+                           << ",\"flags\":" << flags
+                           << ",\"in_s1\":" << inS1
+                           << ",\"in_s2\":" << inS2
+                           << ",\"bytes\":[";
+            for (int i = 0; i < 16; i++) {
+                if (i != 0) blockTraceFile << ",";
+                blockTraceFile << static_cast<unsigned>(blockData[i]);
+            }
+            blockTraceFile << "]}\n";
+        }
+
+        void writeMix(int16_t left, int16_t right) {
+            if (!recording || !mixFile.is_open()) return;
+            mixFile.write(reinterpret_cast<char*>(&left), 2);
+            mixFile.write(reinterpret_cast<char*>(&right), 2);
+            sampleCount++;
+        }
+
+        void writeVoice(unsigned ch, int16_t sample) {
+            if (!recording || !capturePerVoice || ch >= MAXCHAN) return;
+            if (!voiceFiles[ch].is_open()) return;
+            voiceFiles[ch].write(reinterpret_cast<char*>(&sample), 2);
+        }
+
+        static void rawToWav(const std::string& rawPath, const std::string& wavPath,
+                             uint16_t channels, uint32_t numSamples) {
+            std::ifstream raw(rawPath, std::ios::binary);
+            if (!raw.is_open()) return;
+            raw.seekg(0, std::ios::end);
+            uint32_t dataSize = (uint32_t)raw.tellg();
+            raw.seekg(0, std::ios::beg);
+            std::vector<char> data(dataSize);
+            raw.read(data.data(), dataSize);
+            raw.close();
+
+            std::ofstream wav(wavPath, std::ios::binary);
+            uint32_t sampleRate = 44100;
+            uint16_t bitsPerSample = 16;
+            uint16_t blockAlign = channels * bitsPerSample / 8;
+            uint32_t byteRate = sampleRate * blockAlign;
+            uint32_t fileSize = 36 + dataSize;
+            uint16_t audioFmt = 1;
+            uint32_t fmtSize = 16;
+
+            wav.write("RIFF", 4);
+            wav.write(reinterpret_cast<char*>(&fileSize), 4);
+            wav.write("WAVE", 4);
+            wav.write("fmt ", 4);
+            wav.write(reinterpret_cast<char*>(&fmtSize), 4);
+            wav.write(reinterpret_cast<char*>(&audioFmt), 2);
+            wav.write(reinterpret_cast<char*>(&channels), 2);
+            wav.write(reinterpret_cast<char*>(&sampleRate), 4);
+            wav.write(reinterpret_cast<char*>(&byteRate), 4);
+            wav.write(reinterpret_cast<char*>(&blockAlign), 2);
+            wav.write(reinterpret_cast<char*>(&bitsPerSample), 2);
+            wav.write("data", 4);
+            wav.write(reinterpret_cast<char*>(&dataSize), 4);
+            wav.write(data.data(), dataSize);
+            wav.close();
+
+            std::remove(rawPath.c_str());
+        }
+    } m_capture;
 
     // debug window
     unsigned m_selectedChannel = 0;

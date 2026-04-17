@@ -96,6 +96,12 @@
 #include <chrono>
 #include <thread>
 
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
 #include "spu/adsr.h"
 #include "spu/externals.h"
 #include "spu/gauss.h"
@@ -437,7 +443,7 @@ inline int PCSX::SPU::impl::iGetInterpolationVal(SPUCHAN *pChannel) {
 ////////////////////////////////////////////////////////////////////////
 
 void PCSX::SPU::impl::MainThread() {
-    int s_1, s_2, fa, ns;
+    int s_1, s_2, in_s1, in_s2, fa, ns, decodedFaForSample;
     uint8_t *start;
     unsigned int nSample;
     int ch, predict_nr, shift_factor, flags, d, s;
@@ -507,6 +513,17 @@ void PCSX::SPU::impl::MainThread() {
                 }
 
                 if (!pChannel->data.get<PCSX::SPU::Chan::On>().value) {
+                    if (m_capture.recording) {
+                        uint32_t startAddr = pChannel->pStart ? static_cast<uint32_t>(pChannel->pStart - spuMemC) : 0;
+                        uint32_t loopAddr = pChannel->pLoop ? static_cast<uint32_t>(pChannel->pLoop - spuMemC) : 0;
+                        uint32_t currAddr = pChannel->pCurr ? static_cast<uint32_t>(pChannel->pCurr - spuMemC) : 0;
+                        m_capture.writeVoiceEvent(ch, m_capture.sampleCount, false,
+                                                  pChannel->data.get<PCSX::SPU::Chan::Stop>().value,
+                                                  pChannel->data.get<PCSX::SPU::Chan::RawPitch>().value,
+                                                  startAddr, loopAddr, currAddr,
+                                                  pChannel->ADSRX.get<exState>().value,
+                                                  pChannel->ADSRX.get<exVolume>().value, 0);
+                    }
                     // Although the voices may stop outputting audio, the capture buffer is still filling up.
                     if (pMixIrq && ch == 1) {
                         std::unique_lock<std::mutex> lock(cbMtx);
@@ -516,6 +533,10 @@ void PCSX::SPU::impl::MainThread() {
                         std::unique_lock<std::mutex> lock(cbMtx);
                         for (int c = 0; c < NSSIZE; c++) spuMem[tmpCapVoice3Index + c + 0x600] = 0;
                         tmpCapVoice3Index = (tmpCapVoice3Index + NSSIZE) % 0x200;
+                    }
+                    // SPU Capture: write silence for inactive voice
+                    if (m_capture.recording && m_capture.capturePerVoice) {
+                        for (int c = 0; c < NSSIZE; c++) m_capture.writeVoice(ch, 0);
                     }
                     continue;  // channel not playing? next
                 }
@@ -528,6 +549,7 @@ void PCSX::SPU::impl::MainThread() {
 
                 while (ns < NSSIZE)  // loop until 1 ms of data is reached
                 {
+                    decodedFaForSample = 0;
                     NoiseClock();
 
                     if (pChannel->data.get<PCSX::SPU::Chan::FMod>().value == 1 && iFMod[ns])  // fmod freq channel
@@ -563,6 +585,8 @@ void PCSX::SPU::impl::MainThread() {
 
                             s_1 = pChannel->data.get<PCSX::SPU::Chan::s_1>().value;
                             s_2 = pChannel->data.get<PCSX::SPU::Chan::s_2>().value;
+                            in_s1 = s_1;
+                            in_s2 = s_2;
 
                             predict_nr = (int)*start;
                             start++;
@@ -570,6 +594,12 @@ void PCSX::SPU::impl::MainThread() {
                             predict_nr >>= 4;
                             flags = (int)*start;
                             start++;
+                            if (m_capture.recording && static_cast<int>(ch) == m_capture.debugVoice) {
+                                uint8_t *blockStart = start - 2;
+                                uint32_t blockAddr = static_cast<uint32_t>(blockStart - spuMemC);
+                                m_capture.writeVoiceBlock(ch, m_capture.sampleCount + ns, blockAddr, blockStart,
+                                                          in_s1, in_s2, predict_nr, shift_factor, flags);
+                            }
 
                             // -------------------------------------- //
                             for (nSample = 0; nSample < 28; start++) {
@@ -657,6 +687,7 @@ void PCSX::SPU::impl::MainThread() {
                         fa = pChannel->data.get<PCSX::SPU::Chan::SB>()
                                  .value[pChannel->data.get<PCSX::SPU::Chan::SBPos>().value++]
                                  .value;  // get sample data
+                        decodedFaForSample = fa;
 
                         StoreInterpolationVal(pChannel, fa);  // store val for later interpolation
 
@@ -669,9 +700,38 @@ void PCSX::SPU::impl::MainThread() {
                         fa = iGetNoiseVal(pChannel);  // get noise val
                     else
                         fa = iGetInterpolationVal(pChannel);  // get sample val
+                    int interpSample = fa;
 
                     int32_t mixedSample = (m_adsr.mix(pChannel) * fa) / 1023;  // mix adsr
                     pChannel->data.get<PCSX::SPU::Chan::sval>().value = mixedSample;
+
+                    int16_t capSample = (int16_t)std::clamp(mixedSample, -32767, 32767);
+                    if (m_capture.recording) {
+                        uint32_t sampleIndex = m_capture.sampleCount + ns;
+                        uint32_t startAddr = pChannel->pStart ? static_cast<uint32_t>(pChannel->pStart - spuMemC) : 0;
+                        uint32_t loopAddr = pChannel->pLoop ? static_cast<uint32_t>(pChannel->pLoop - spuMemC) : 0;
+                        uint32_t currAddr = pChannel->pCurr ? static_cast<uint32_t>(pChannel->pCurr - spuMemC) : 0;
+                        m_capture.writeVoiceEvent(ch, sampleIndex,
+                                                  pChannel->data.get<PCSX::SPU::Chan::On>().value,
+                                                  pChannel->data.get<PCSX::SPU::Chan::Stop>().value,
+                                                  pChannel->data.get<PCSX::SPU::Chan::RawPitch>().value,
+                                                  startAddr, loopAddr, currAddr,
+                                                  pChannel->ADSRX.get<exState>().value,
+                                                  pChannel->ADSRX.get<exVolume>().value, capSample);
+                        m_capture.writeVoiceDenseEvent(ch, sampleIndex, decodedFaForSample, interpSample, capSample,
+                                                       startAddr, loopAddr, currAddr,
+                                                       pChannel->ADSRX.get<exState>().value,
+                                                       pChannel->ADSRX.get<exVolume>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::SBPos>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::spos>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::s_1>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::s_2>().value);
+                    }
+
+                    // SPU Capture: per-voice sample (after ADSR, before volume)
+                    if (m_capture.recording && m_capture.capturePerVoice) {
+                        m_capture.writeVoice(ch, capSample);
+                    }
 
                     // Capture buffer should contain voice1/3 sample after any adsr processing but before volume
                     // processing?
@@ -741,6 +801,7 @@ void PCSX::SPU::impl::MainThread() {
             if (d < -32767) d = -32767;
             if (d > 32767) d = 32767;
             *pS++ = d;
+            int16_t capL = (int16_t)d;
 
             SSumR[ns] += MixREVERBRight();
 
@@ -749,6 +810,11 @@ void PCSX::SPU::impl::MainThread() {
             if (d < -32767) d = -32767;
             if (d > 32767) d = 32767;
             *pS++ = d;
+
+            // SPU Capture: final stereo mix
+            if (m_capture.recording) {
+                m_capture.writeMix(capL, (int16_t)d);
+            }
         }
 
         //////////////////////////////////////////////////////
@@ -1056,6 +1122,82 @@ void PCSX::SPU::impl::setLua(Lua L) {
     L.push("spu");
     settings.pushValue(L);
     L.settable();
-    L.pop();
-    L.pop();
+    L.pop();  // pop settings
+
+    // SPU audio capture functions: PCSX.SPU.startCapture/stopCapture/isRecording/getSampleCount
+    L.getfieldtable("SPU");
+
+    L.declareFunc(
+        "startCapture",
+        [this](Lua L) -> int {
+            std::string dir = L.gettop() >= 1 ? L.tostring(1) : "spu_capture";
+            bool perVoice = L.gettop() >= 2 ? L.toboolean(2) : false;
+            int debugVoice = L.gettop() >= 3 ? static_cast<int>(L.tonumber(3)) : -1;
+#ifdef _WIN32
+            _mkdir(dir.c_str());
+#else
+            mkdir(dir.c_str(), 0755);
+#endif
+            m_capture.start(dir, perVoice, debugVoice);
+            return 0;
+        },
+        -1);
+
+    L.declareFunc(
+        "stopCapture",
+        [this](Lua) -> int {
+            m_capture.stop();
+            return 0;
+        },
+        -1);
+
+    L.declareFunc(
+        "isRecording",
+        [this](Lua L) -> int {
+            L.push(m_capture.recording.load());
+            return 1;
+        },
+        -1);
+
+    L.declareFunc(
+        "getSampleCount",
+        [this](Lua L) -> int {
+            L.push(lua_Number(m_capture.sampleCount));
+            return 1;
+        },
+        -1);
+
+    L.declareFunc(
+        "getVoiceInfo",
+        [this](Lua L) -> int {
+            int ch = L.gettop() >= 1 ? (int)L.tonumber(1) : 0;
+            if (ch < 0 || ch >= MAXCHAN) { L.push(false); return 1; }
+            auto& chan = s_chan[ch];
+            // Return a table with all the ADSR and voice state
+            L.newtable();
+            L.push("attackRate"); L.push(lua_Number(chan.ADSRX.get<exAttackRate>().value)); L.settable(-3);
+            L.push("attackExp"); L.push(lua_Number(chan.ADSRX.get<exAttackModeExp>().value)); L.settable(-3);
+            L.push("decayRate"); L.push(lua_Number(chan.ADSRX.get<exDecayRate>().value)); L.settable(-3);
+            L.push("sustainLevel"); L.push(lua_Number(chan.ADSRX.get<exSustainLevel>().value)); L.settable(-3);
+            L.push("sustainRate"); L.push(lua_Number(chan.ADSRX.get<exSustainRate>().value)); L.settable(-3);
+            L.push("sustainExp"); L.push(lua_Number(chan.ADSRX.get<exSustainModeExp>().value)); L.settable(-3);
+            L.push("sustainIncrease"); L.push(lua_Number(chan.ADSRX.get<exSustainIncrease>().value)); L.settable(-3);
+            L.push("releaseRate"); L.push(lua_Number(chan.ADSRX.get<exReleaseRate>().value)); L.settable(-3);
+            L.push("releaseExp"); L.push(lua_Number(chan.ADSRX.get<exReleaseModeExp>().value)); L.settable(-3);
+            L.push("adsrState"); L.push(lua_Number(chan.ADSRX.get<exState>().value)); L.settable(-3);
+            L.push("envelopeVol"); L.push(lua_Number(chan.ADSRX.get<exEnvelopeVol>().value)); L.settable(-3);
+            L.push("volume"); L.push(lua_Number(chan.ADSRX.get<exVolume>().value)); L.settable(-3);
+            // Sample addresses
+            auto pStart = chan.pStart;
+            auto pLoop = chan.pLoop;
+            auto pCurr = chan.pCurr;
+            L.push("startAddr"); L.push(lua_Number(pStart ? (pStart - spuMemC) : 0)); L.settable(-3);
+            L.push("loopAddr"); L.push(lua_Number(pLoop ? (pLoop - spuMemC) : 0)); L.settable(-3);
+            L.push("currAddr"); L.push(lua_Number(pCurr ? (pCurr - spuMemC) : 0)); L.settable(-3);
+            return 1;
+        },
+        -1);
+
+    L.pop();       // pop SPU table
+    L.pop();       // pop PCSX table
 }
