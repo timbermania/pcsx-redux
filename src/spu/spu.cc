@@ -517,12 +517,24 @@ void PCSX::SPU::impl::MainThread() {
                         uint32_t startAddr = pChannel->pStart ? static_cast<uint32_t>(pChannel->pStart - spuMemC) : 0;
                         uint32_t loopAddr = pChannel->pLoop ? static_cast<uint32_t>(pChannel->pLoop - spuMemC) : 0;
                         uint32_t currAddr = pChannel->pCurr ? static_cast<uint32_t>(pChannel->pCurr - spuMemC) : 0;
+                        uint16_t adsr1 = static_cast<uint16_t>(
+                            (pChannel->ADSRX.get<exSustainLevel>().value & 0xF) |
+                            ((pChannel->ADSRX.get<exDecayRate>().value & 0xF) << 4) |
+                            ((pChannel->ADSRX.get<exAttackRate>().value & 0x7F) << 8) |
+                            ((pChannel->ADSRX.get<exAttackModeExp>().value & 1) << 15));
+                        uint16_t adsr2 = static_cast<uint16_t>(
+                            (pChannel->ADSRX.get<exReleaseRate>().value & 0x1F) |
+                            ((pChannel->ADSRX.get<exReleaseModeExp>().value & 1) << 5) |
+                            ((pChannel->ADSRX.get<exSustainRate>().value & 0x7F) << 6) |
+                            ((1 - (pChannel->ADSRX.get<exSustainIncrease>().value & 1)) << 14) |
+                            ((pChannel->ADSRX.get<exSustainModeExp>().value & 1) << 15));
                         m_capture.writeVoiceEvent(ch, m_capture.sampleCount, false,
                                                   pChannel->data.get<PCSX::SPU::Chan::Stop>().value,
                                                   pChannel->data.get<PCSX::SPU::Chan::RawPitch>().value,
                                                   startAddr, loopAddr, currAddr,
                                                   pChannel->ADSRX.get<exState>().value,
-                                                  pChannel->ADSRX.get<exVolume>().value, 0);
+                                                  pChannel->ADSRX.get<exVolume>().value, 0,
+                                                  adsr1, adsr2);
                     }
                     // Although the voices may stop outputting audio, the capture buffer is still filling up.
                     if (pMixIrq && ch == 1) {
@@ -711,13 +723,25 @@ void PCSX::SPU::impl::MainThread() {
                         uint32_t startAddr = pChannel->pStart ? static_cast<uint32_t>(pChannel->pStart - spuMemC) : 0;
                         uint32_t loopAddr = pChannel->pLoop ? static_cast<uint32_t>(pChannel->pLoop - spuMemC) : 0;
                         uint32_t currAddr = pChannel->pCurr ? static_cast<uint32_t>(pChannel->pCurr - spuMemC) : 0;
+                        uint16_t adsr1 = static_cast<uint16_t>(
+                            (pChannel->ADSRX.get<exSustainLevel>().value & 0xF) |
+                            ((pChannel->ADSRX.get<exDecayRate>().value & 0xF) << 4) |
+                            ((pChannel->ADSRX.get<exAttackRate>().value & 0x7F) << 8) |
+                            ((pChannel->ADSRX.get<exAttackModeExp>().value & 1) << 15));
+                        uint16_t adsr2 = static_cast<uint16_t>(
+                            (pChannel->ADSRX.get<exReleaseRate>().value & 0x1F) |
+                            ((pChannel->ADSRX.get<exReleaseModeExp>().value & 1) << 5) |
+                            ((pChannel->ADSRX.get<exSustainRate>().value & 0x7F) << 6) |
+                            ((1 - (pChannel->ADSRX.get<exSustainIncrease>().value & 1)) << 14) |
+                            ((pChannel->ADSRX.get<exSustainModeExp>().value & 1) << 15));
                         m_capture.writeVoiceEvent(ch, sampleIndex,
                                                   pChannel->data.get<PCSX::SPU::Chan::On>().value,
                                                   pChannel->data.get<PCSX::SPU::Chan::Stop>().value,
                                                   pChannel->data.get<PCSX::SPU::Chan::RawPitch>().value,
                                                   startAddr, loopAddr, currAddr,
                                                   pChannel->ADSRX.get<exState>().value,
-                                                  pChannel->ADSRX.get<exVolume>().value, capSample);
+                                                  pChannel->ADSRX.get<exVolume>().value, capSample,
+                                                  adsr1, adsr2);
                         m_capture.writeVoiceDenseEvent(ch, sampleIndex, decodedFaForSample, interpSample, capSample,
                                                        startAddr, loopAddr, currAddr,
                                                        pChannel->ADSRX.get<exState>().value,

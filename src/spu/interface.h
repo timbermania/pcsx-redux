@@ -317,6 +317,8 @@ class impl final : public SPUInterface {
             uint32_t currAddr = 0;
             int envState = -1;
             int envVol = -1;
+            uint16_t adsr1 = 0xffff;  // 0xffff so first event always fires
+            uint16_t adsr2 = 0xffff;
         };
 
         VoiceEventState prevVoiceEvents[MAXCHAN];
@@ -378,12 +380,14 @@ class impl final : public SPUInterface {
 
         void writeVoiceEvent(unsigned ch, uint32_t sampleIndex, bool on, bool stop, uint16_t rawPitch,
                              uint32_t startAddr, uint32_t loopAddr, uint32_t currAddr,
-                             int envState, int envVol, int16_t sample) {
+                             int envState, int envVol, int16_t sample,
+                             uint16_t adsr1 = 0, uint16_t adsr2 = 0) {
             if (!recording || !traceFile.is_open() || ch >= MAXCHAN) return;
             auto &prev = prevVoiceEvents[ch];
             if (prev.valid && prev.on == on && prev.stop == stop && prev.rawPitch == rawPitch &&
                 prev.startAddr == startAddr && prev.loopAddr == loopAddr && prev.currAddr == currAddr &&
-                prev.envState == envState && prev.envVol == envVol) {
+                prev.envState == envState && prev.envVol == envVol &&
+                prev.adsr1 == adsr1 && prev.adsr2 == adsr2) {
                 return;
             }
             traceFile << "{\"kind\":\"voice_event\",\"voice\":" << ch
@@ -397,6 +401,8 @@ class impl final : public SPUInterface {
                       << ",\"env_state\":" << envState
                       << ",\"env_vol\":" << envVol
                       << ",\"sample\":" << sample
+                      << ",\"adsr1\":" << adsr1
+                      << ",\"adsr2\":" << adsr2
                       << "}\n";
             traceFile.flush();
             prev.valid = true;
@@ -408,6 +414,8 @@ class impl final : public SPUInterface {
             prev.currAddr = currAddr;
             prev.envState = envState;
             prev.envVol = envVol;
+            prev.adsr1 = adsr1;
+            prev.adsr2 = adsr2;
         }
 
         void writeVoiceDenseEvent(unsigned ch, uint32_t sampleIndex, int decodedSample, int interpSample, int mixedSample,
