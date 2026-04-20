@@ -1271,6 +1271,20 @@ void PCSX::SPU::impl::setLua(Lua L) {
             L.push("startAddr"); L.push(lua_Number(pStart ? (pStart - spuMemC) : 0)); L.settable(-3);
             L.push("loopAddr"); L.push(lua_Number(pLoop ? (pLoop - spuMemC) : 0)); L.settable(-3);
             L.push("currAddr"); L.push(lua_Number(pCurr ? (pCurr - spuMemC) : 0)); L.settable(-3);
+            // Per-voice reverb routing. "reverb" is the config bit set
+            // from 0x1F801D98 / 0x1F801D9A (ctrl register). "rvb_active"
+            // is the runtime-gated flag that actually feeds StoreREVERB.
+            L.push("reverb"); L.push(chan.data.get<Chan::Reverb>().value); L.settable(-3);
+            L.push("rvb_active"); L.push(chan.data.get<Chan::RVBActive>().value); L.settable(-3);
+            // Per-voice L/R volume (post-panning, what feeds the mix).
+            L.push("leftVolume"); L.push(lua_Number(chan.data.get<Chan::LeftVolume>().value)); L.settable(-3);
+            L.push("rightVolume"); L.push(lua_Number(chan.data.get<Chan::RightVolume>().value)); L.settable(-3);
+            // Raw pitch (SPU 14-bit register value) — lets the caller
+            // see the actual playback rate in use.
+            L.push("rawPitch"); L.push(lua_Number(chan.data.get<Chan::RawPitch>().value)); L.settable(-3);
+            // On/stop flags — also useful in parity probes.
+            L.push("on"); L.push(chan.data.get<Chan::On>().value); L.settable(-3);
+            L.push("stop"); L.push(chan.data.get<Chan::Stop>().value); L.settable(-3);
             return 1;
         },
         -1);
