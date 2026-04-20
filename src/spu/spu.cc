@@ -1192,6 +1192,59 @@ void PCSX::SPU::impl::setLua(Lua L) {
         -1);
 
     L.declareFunc(
+        "getReverbInfo",
+        [this](Lua L) -> int {
+            // Snapshot of the SPU reverb state — for parity probes against
+            // custom SPU implementations that need to mirror the real SPU's
+            // reverb coefficients / delay offsets / output gains. Values
+            // here are populated by register writes at 0x1F801DC0-0x1F801DFF
+            // + 0x1F801184/86 (vLOUT/vROUT); see registers.cc handlers.
+            L.newtable();
+            L.push("startAddr"); L.push(lua_Number(rvb.StartAddr)); L.settable(-3);
+            L.push("currAddr"); L.push(lua_Number(rvb.CurrAddr)); L.settable(-3);
+            L.push("volLeft"); L.push(lua_Number(rvb.VolLeft)); L.settable(-3);
+            L.push("volRight"); L.push(lua_Number(rvb.VolRight)); L.settable(-3);
+            L.push("iLastRVBLeft"); L.push(lua_Number(rvb.iLastRVBLeft)); L.settable(-3);
+            L.push("iLastRVBRight"); L.push(lua_Number(rvb.iLastRVBRight)); L.settable(-3);
+            L.push("iRVBLeft"); L.push(lua_Number(rvb.iRVBLeft)); L.settable(-3);
+            L.push("iRVBRight"); L.push(lua_Number(rvb.iRVBRight)); L.settable(-3);
+            L.push("FB_SRC_A"); L.push(lua_Number(rvb.FB_SRC_A)); L.settable(-3);
+            L.push("FB_SRC_B"); L.push(lua_Number(rvb.FB_SRC_B)); L.settable(-3);
+            L.push("IIR_ALPHA"); L.push(lua_Number(rvb.IIR_ALPHA)); L.settable(-3);
+            L.push("ACC_COEF_A"); L.push(lua_Number(rvb.ACC_COEF_A)); L.settable(-3);
+            L.push("ACC_COEF_B"); L.push(lua_Number(rvb.ACC_COEF_B)); L.settable(-3);
+            L.push("ACC_COEF_C"); L.push(lua_Number(rvb.ACC_COEF_C)); L.settable(-3);
+            L.push("ACC_COEF_D"); L.push(lua_Number(rvb.ACC_COEF_D)); L.settable(-3);
+            L.push("IIR_COEF"); L.push(lua_Number(rvb.IIR_COEF)); L.settable(-3);
+            L.push("FB_ALPHA"); L.push(lua_Number(rvb.FB_ALPHA)); L.settable(-3);
+            L.push("FB_X"); L.push(lua_Number(rvb.FB_X)); L.settable(-3);
+            L.push("IIR_DEST_A0"); L.push(lua_Number(rvb.IIR_DEST_A0)); L.settable(-3);
+            L.push("IIR_DEST_A1"); L.push(lua_Number(rvb.IIR_DEST_A1)); L.settable(-3);
+            L.push("ACC_SRC_A0"); L.push(lua_Number(rvb.ACC_SRC_A0)); L.settable(-3);
+            L.push("ACC_SRC_A1"); L.push(lua_Number(rvb.ACC_SRC_A1)); L.settable(-3);
+            L.push("ACC_SRC_B0"); L.push(lua_Number(rvb.ACC_SRC_B0)); L.settable(-3);
+            L.push("ACC_SRC_B1"); L.push(lua_Number(rvb.ACC_SRC_B1)); L.settable(-3);
+            L.push("IIR_SRC_A0"); L.push(lua_Number(rvb.IIR_SRC_A0)); L.settable(-3);
+            L.push("IIR_SRC_A1"); L.push(lua_Number(rvb.IIR_SRC_A1)); L.settable(-3);
+            L.push("IIR_DEST_B0"); L.push(lua_Number(rvb.IIR_DEST_B0)); L.settable(-3);
+            L.push("IIR_DEST_B1"); L.push(lua_Number(rvb.IIR_DEST_B1)); L.settable(-3);
+            L.push("ACC_SRC_C0"); L.push(lua_Number(rvb.ACC_SRC_C0)); L.settable(-3);
+            L.push("ACC_SRC_C1"); L.push(lua_Number(rvb.ACC_SRC_C1)); L.settable(-3);
+            L.push("ACC_SRC_D0"); L.push(lua_Number(rvb.ACC_SRC_D0)); L.settable(-3);
+            L.push("ACC_SRC_D1"); L.push(lua_Number(rvb.ACC_SRC_D1)); L.settable(-3);
+            L.push("IIR_SRC_B1"); L.push(lua_Number(rvb.IIR_SRC_B1)); L.settable(-3);
+            L.push("IIR_SRC_B0"); L.push(lua_Number(rvb.IIR_SRC_B0)); L.settable(-3);
+            L.push("MIX_DEST_A0"); L.push(lua_Number(rvb.MIX_DEST_A0)); L.settable(-3);
+            L.push("MIX_DEST_A1"); L.push(lua_Number(rvb.MIX_DEST_A1)); L.settable(-3);
+            L.push("MIX_DEST_B0"); L.push(lua_Number(rvb.MIX_DEST_B0)); L.settable(-3);
+            L.push("MIX_DEST_B1"); L.push(lua_Number(rvb.MIX_DEST_B1)); L.settable(-3);
+            L.push("IN_COEF_L"); L.push(lua_Number(rvb.IN_COEF_L)); L.settable(-3);
+            L.push("IN_COEF_R"); L.push(lua_Number(rvb.IN_COEF_R)); L.settable(-3);
+            return 1;
+        },
+        -1);
+
+    L.declareFunc(
         "getVoiceInfo",
         [this](Lua L) -> int {
             int ch = L.gettop() >= 1 ? (int)L.tonumber(1) : 0;
