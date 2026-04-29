@@ -1293,6 +1293,36 @@ void PCSX::SPU::impl::setLua(Lua L) {
         },
         -1);
 
+    // SPU RAM read for parity probes — returns hex string of `len`
+    // bytes starting at SPU RAM offset `addr`. Effect-parity work
+    // needs this to identify which WAVESET sample bytes are loaded
+    // at a given pStart address (since FFT only writes the SPU
+    // sample-start register once at init; per-effect samples land
+    // in SPU RAM via DMA, and we need to map those back to source
+    // instruments).
+    L.declareFunc(
+        "readSpuRam",
+        [this](Lua L) -> int {
+            if (L.gettop() < 2) { L.push(""); return 1; }
+            int addr = (int)L.tonumber(1);
+            int len = (int)L.tonumber(2);
+            if (addr < 0) addr = 0;
+            if (len < 0) len = 0;
+            if (len > 4096) len = 4096;
+            std::string hex;
+            hex.reserve(len * 2);
+            static const char *digits = "0123456789ABCDEF";
+            for (int i = 0; i < len; i++) {
+                int off = (addr + i) & 0x7FFFF;  // 512KB SPU RAM mask
+                uint8_t b = spuMemC[off];
+                hex.push_back(digits[(b >> 4) & 0xF]);
+                hex.push_back(digits[b & 0xF]);
+            }
+            L.push(hex.c_str());
+            return 1;
+        },
+        -1);
+
     L.pop();       // pop SPU table
     L.pop();       // pop PCSX table
 }
