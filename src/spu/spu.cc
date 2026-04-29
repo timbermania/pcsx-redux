@@ -1285,6 +1285,10 @@ void PCSX::SPU::impl::setLua(Lua L) {
             // On/stop flags — also useful in parity probes.
             L.push("on"); L.push(chan.data.get<Chan::On>().value); L.settable(-3);
             L.push("stop"); L.push(chan.data.get<Chan::Stop>().value); L.settable(-3);
+            // FMod / Noise routing — needed to detect frequency-modulation
+            // chains (e.g. FFT cure pair v20 driving v21's pitch).
+            L.push("fmod"); L.push(lua_Number(chan.data.get<Chan::FMod>().value)); L.settable(-3);
+            L.push("noise"); L.push(chan.data.get<Chan::Noise>().value); L.settable(-3);
             return 1;
         },
         -1);
