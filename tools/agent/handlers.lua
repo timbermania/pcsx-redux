@@ -30,6 +30,7 @@ local state = {
     paused = true,               -- flipped by Run/Pause events; -run triggers Run
     save_state_loaded_count = 0,
     started_at_ms = nil,
+    pad_releases = {},
 }
 
 do
@@ -44,6 +45,13 @@ end
 local listeners = {}
 table.insert(listeners, PCSX.Events.createEventListener("GPU::Vsync", function()
     state.vsync_count = state.vsync_count + 1
+    for i = #state.pad_releases, 1, -1 do
+        local release = state.pad_releases[i]
+        if state.vsync_count >= release.vsync then
+            release.pad.clearOverride(release.button)
+            table.remove(state.pad_releases, i)
+        end
+    end
 end))
 table.insert(listeners, PCSX.Events.createEventListener("ExecutionFlow::ShellReached", function()
     state.shell_reached = true
@@ -137,6 +145,48 @@ local function parse_int(s, default)
     local n = tonumber(s)
     if not n then return default end
     return math.floor(n)
+end
+
+local pad_buttons = {
+    select = PCSX.CONSTS.PAD.BUTTON.SELECT,
+    start = PCSX.CONSTS.PAD.BUTTON.START,
+    enter = PCSX.CONSTS.PAD.BUTTON.START,
+    up = PCSX.CONSTS.PAD.BUTTON.UP,
+    right = PCSX.CONSTS.PAD.BUTTON.RIGHT,
+    down = PCSX.CONSTS.PAD.BUTTON.DOWN,
+    left = PCSX.CONSTS.PAD.BUTTON.LEFT,
+    l2 = PCSX.CONSTS.PAD.BUTTON.L2,
+    r2 = PCSX.CONSTS.PAD.BUTTON.R2,
+    l1 = PCSX.CONSTS.PAD.BUTTON.L1,
+    r1 = PCSX.CONSTS.PAD.BUTTON.R1,
+    triangle = PCSX.CONSTS.PAD.BUTTON.TRIANGLE,
+    circle = PCSX.CONSTS.PAD.BUTTON.CIRCLE,
+    cross = PCSX.CONSTS.PAD.BUTTON.CROSS,
+    x = PCSX.CONSTS.PAD.BUTTON.CROSS,
+    confirm = PCSX.CONSTS.PAD.BUTTON.CROSS,
+    square = PCSX.CONSTS.PAD.BUTTON.SQUARE,
+}
+
+local function normalize_button(button)
+    if type(button) == "number" then return button end
+    if type(button) ~= "string" then return nil end
+    local key = button:lower():gsub("^%s+", ""):gsub("%s+$", "")
+    key = key:gsub("^pad_", "")
+    return pad_buttons[key]
+end
+
+local function get_pad(port)
+    port = tonumber(port) or 1
+    port = math.floor(port)
+    local slot = PCSX.SIO0 and PCSX.SIO0.slots and PCSX.SIO0.slots[port]
+    local pad = slot and slot.pads and slot.pads[1]
+    return pad, port
+end
+
+local function split_words(s)
+    local words = {}
+    for word in string.gmatch(s or "", "%S+") do words[#words + 1] = word end
+    return words
 end
 
 -- Extract a single-valued query param from the raw query string
@@ -233,6 +283,69 @@ H.console_clear = function(req)
     return respond("")
 end
 
+-- POST /api/v1/lua/pad_set  body/query: button [pressed] [port]
+-- Examples: "start", "down 1 1", "cross false". Query params also work.
+H.pad_set = function(req)
+    local words = split_words(req.body or "")
+    local button_name = query_param(req, "button") or words[1]
+    local pressed_arg = query_param(req, "pressed") or words[2] or "true"
+    local port_arg = query_param(req, "port") or words[3] or "1"
+    local button = normalize_button(button_name)
+    if not button then return respond_error(400, "Bad Request", "unknown pad button\n") end
+    local pad, port = get_pad(port_arg)
+    if not pad then return respond_error(400, "Bad Request", "pad port not available\n") end
+    local pressed = not (pressed_arg == "0" or pressed_arg == "false" or pressed_arg == "up" or pressed_arg == "release")
+    if pressed then pad.setOverride(button) else pad.clearOverride(button) end
+    return json_respond({ port = port, button = button_name, buttonIndex = button, pressed = pressed })
+end
+
+-- POST /api/v1/lua/pad_press  body/query: button [frames] [port]
+-- Presses immediately and releases after the requested number of GPU vsyncs.
+H.pad_press = function(req)
+    local words = split_words(req.body or "")
+    local button_name = query_param(req, "button") or words[1]
+    local frames = parse_int(query_param(req, "frames") or words[2], 6)
+    local port_arg = query_param(req, "port") or words[3] or "1"
+    if frames < 1 then frames = 1 end
+    local button = normalize_button(button_name)
+    if not button then return respond_error(400, "Bad Request", "unknown pad button\n") end
+    local pad, port = get_pad(port_arg)
+    if not pad then return respond_error(400, "Bad Request", "pad port not available\n") end
+    pad.setOverride(button)
+    state.pad_releases[#state.pad_releases + 1] = {
+        pad = pad, button = button, vsync = state.vsync_count + frames,
+    }
+    return json_respond({
+        port = port, button = button_name, buttonIndex = button,
+        pressed = true, releaseVsync = state.vsync_count + frames,
+    })
+end
+
+-- POST /api/v1/lua/pad_clear  body/query: [port]
+H.pad_clear = function(req)
+    local words = split_words(req.body or "")
+    local port_arg = query_param(req, "port") or words[1] or "1"
+    local pad, port = get_pad(port_arg)
+    if not pad then return respond_error(400, "Bad Request", "pad port not available\n") end
+    for _, button in pairs(pad_buttons) do pad.clearOverride(button) end
+    for i = #state.pad_releases, 1, -1 do
+        if state.pad_releases[i].pad == pad then table.remove(state.pad_releases, i) end
+    end
+    return json_respond({ port = port, cleared = true })
+end
+
+-- GET /api/v1/lua/pad_status[?port=1]
+H.pad_status = function(req)
+    local port_arg = query_param(req, "port") or "1"
+    local pad, port = get_pad(port_arg)
+    if not pad then return respond_error(400, "Bad Request", "pad port not available\n") end
+    local pressed = {}
+    for name, button in pairs(pad_buttons) do
+        if pad.getButton(button) then pressed[#pressed + 1] = name end
+    end
+    return json_respond({ port = port, vsync = state.vsync_count, pendingReleases = #state.pad_releases, pressed = pressed })
+end
+
 -- POST /api/v1/lua/pause
 H.pause = function(req)
     PCSX.pauseEmulator()
@@ -265,4 +378,5 @@ end
 
 PCSX.log("agent handlers loaded: "
     .. "ping, heartbeat, ready, exec, console, console_clear, "
+    .. "pad_set, pad_press, pad_clear, pad_status, "
     .. "pause, resume, reset, quit")
