@@ -27,7 +27,6 @@ local state = {
     vsync_count = 0,
     shell_reached_vsync = nil,   -- set once ShellReached fires
     shell_reached = false,
-    paused = true,               -- flipped by Run/Pause events; -run triggers Run
     save_state_loaded_count = 0,
     started_at_ms = nil,
     pad_releases = {},
@@ -56,12 +55,6 @@ end))
 table.insert(listeners, PCSX.Events.createEventListener("ExecutionFlow::ShellReached", function()
     state.shell_reached = true
     state.shell_reached_vsync = state.vsync_count
-end))
-table.insert(listeners, PCSX.Events.createEventListener("ExecutionFlow::Run", function()
-    state.paused = false
-end))
-table.insert(listeners, PCSX.Events.createEventListener("ExecutionFlow::Pause", function()
-    state.paused = true
 end))
 table.insert(listeners, PCSX.Events.createEventListener("ExecutionFlow::SaveStateLoaded", function()
     state.save_state_loaded_count = state.save_state_loaded_count + 1
@@ -216,7 +209,6 @@ H.heartbeat = function(req)
     return json_respond({
         cycles = cycles_str,
         vsync = state.vsync_count,
-        paused = state.paused,
         shellReached = state.shell_reached,
         shellReachedVsync = state.shell_reached_vsync,
         saveStateLoadedCount = state.save_state_loaded_count,
