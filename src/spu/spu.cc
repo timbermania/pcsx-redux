@@ -1323,6 +1323,35 @@ void PCSX::SPU::impl::setLua(Lua L) {
         },
         -1);
 
+    // Effect-parity hook (FFT project, fft-monorepo-effects-parity branch):
+    // immediately silence every SPU voice. The use case is a savestate
+    // captured mid-replay where one or more voices are still active
+    // (residue from the prior spell instance). Calling this once
+    // post-savestate-load gives a clean SPU baseline matching what a
+    // fresh-boot Godot renderer sees, so per-voice WAV captures start
+    // with PCSX silent until the FFT runtime fires its first KON.
+    //
+    // Steps per voice: zero envelope vol + envelope_vol_fraction, force
+    // ADSR state to Stopped, set Chan::On=false / Chan::Stop=false (NOT
+    // true — Stop=true triggers RELEASE which still produces audio).
+    // Also clears the global on/keyoff/fmod/noise/reverb register
+    // bookkeeping so the per-tick SPU dispatcher doesn't re-key
+    // anything from stale flags.
+    L.declareFunc(
+        "silenceAllVoices",
+        [this](Lua) -> int {
+            for (int ch = 0; ch < MAXCHAN; ch++) {
+                s_chan[ch].ADSRX.get<exEnvelopeVol>().value = 0;
+                s_chan[ch].ADSRX.get<exEnvelopeVolF>().value = 0;
+                s_chan[ch].ADSRX.get<exState>().value = 4;  // ADSR::ADSRState::Stopped (private enum)
+                s_chan[ch].data.get<Chan::On>().value = false;
+                s_chan[ch].data.get<Chan::Stop>().value = false;
+                s_chan[ch].ADSR.get<ReleaseVol>().value = 0;
+            }
+            return 0;
+        },
+        -1);
+
     L.pop();       // pop SPU table
     L.pop();       // pop PCSX table
 }
