@@ -1191,6 +1191,23 @@ void PCSX::SPU::impl::setLua(Lua L) {
         },
         -1);
 
+    // Snapshot of the global SPU noise generator state (m_noiseVal,
+    // m_noiseClock, m_noiseCount). Added for fft-project parity probes
+    // (effect_alignment iter_0512): ice_v18_min03_b4+ noise sessions need
+    // to seed Godot's noise LFSR from PCSX's runtime state at the moment
+    // a voice enables noise mode (the savestate value is the wrong moment;
+    // PCSX advances the LFSR ~44.1 kHz between sstate-load and noise-on).
+    L.declareFunc(
+        "getNoiseInfo",
+        [this](Lua L) -> int {
+            L.newtable();
+            L.push("noiseVal"); L.push(lua_Number(m_noiseVal)); L.settable(-3);
+            L.push("noiseClock"); L.push(lua_Number(m_noiseClock)); L.settable(-3);
+            L.push("noiseCount"); L.push(lua_Number(m_noiseCount)); L.settable(-3);
+            return 1;
+        },
+        -1);
+
     L.declareFunc(
         "getReverbInfo",
         [this](Lua L) -> int {
