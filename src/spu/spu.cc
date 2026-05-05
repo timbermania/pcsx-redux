@@ -1208,6 +1208,43 @@ void PCSX::SPU::impl::setLua(Lua L) {
         },
         -1);
 
+    // Deterministic seed of the global SPU noise generator. Counterpart
+    // to getNoiseInfo. Added for fft-project iter_0573: PCSX captures
+    // from a savestate produce non-deterministic noise audio across
+    // runs because the (savestate-load → noise-enable) interval has
+    // microsecond-level cycle-count jitter, advancing the LFSR by a
+    // varying number of steps before audible content begins. Even with
+    // Q002I capturing the post-jitter state and seeding Godot, PCSX's
+    // OWN audio output still varies across runs (different bytes / RMS
+    // / sample counts despite identical captured seed at the BP point).
+    //
+    // Calling PCSX.SPU.setNoiseState(val, clock, count) lets a Lua
+    // probe FORCE a fixed seed at a deterministic moment (e.g. right
+    // after savestate-load, before any audio capture starts). Both
+    // PCSX and Godot then advance from the SAME pre-pinned starting
+    // state; the captured audio becomes deterministic across runs.
+    //
+    // Args (all optional, missing = no change):
+    //   1: noiseVal   — 16-bit LFSR value (raw seed)
+    //   2: noiseClock — 6-bit (spuCtrl bits 8-13)
+    //   3: noiseCount — 32-bit step counter
+    L.declareFunc(
+        "setNoiseState",
+        [this](Lua L) -> int {
+            const int top = L.gettop();
+            if (top >= 1) {
+                m_noiseVal = static_cast<uint32_t>(L.tonumber(1));
+            }
+            if (top >= 2) {
+                m_noiseClock = static_cast<uint32_t>(L.tonumber(2)) & 0x3F;
+            }
+            if (top >= 3) {
+                m_noiseCount = static_cast<uint32_t>(L.tonumber(3));
+            }
+            return 0;
+        },
+        -1);
+
     L.declareFunc(
         "getReverbInfo",
         [this](Lua L) -> int {
