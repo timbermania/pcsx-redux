@@ -33,6 +33,7 @@
 #include "core/sstate.h"
 #include "json.hpp"
 #include "spu/adsr.h"
+#include "spu/event_capture.h"
 #include "spu/miniaudio.h"
 #include "spu/types.h"
 #include "support/settings.h"
@@ -53,6 +54,9 @@ class impl final : public SPUInterface {
     // void playSample(uint8_t);
     void writeRegister(uint32_t, uint16_t) final;
     uint16_t readRegister(uint32_t) final;
+    // Inner body of readRegister; the public entry point wraps this so the
+    // event-stream capture (fft-project) sees the returned value.
+    uint16_t readRegisterInner(uint32_t);
     void lockSPURAM() final;
     void unlockSPURAM() final;
     void resetCaptureBuffer() final;
@@ -514,6 +518,11 @@ class impl final : public SPUInterface {
             std::remove(rawPath.c_str());
         }
     } m_capture;
+
+    // Event-stream capture: records every input to the SPU (reg writes/reads,
+    // DMA, XA) into a binary log + initial-state snapshot. See event_capture.h.
+    // Trigger via Lua: PCSX.SPU.startEventCapture(path, label) / stopEventCapture().
+    SpuEventCapture m_eventCapture;
 
     // debug window
     unsigned m_selectedChannel = 0;

@@ -28,6 +28,8 @@
 //*************************************************************************//
 
 #include <algorithm>
+#include <cstring>
+#include <vector>
 
 #include "spu/externals.h"
 #include "spu/gauss.h"
@@ -47,6 +49,24 @@ void PCSX::SPU::impl::FeedXA(xa_decode_t *xap) {
     MiniAudio::Frame *XAFeed = XABuffer;
 
     if (!bSPUIsOpen) return;
+
+    // Event-stream capture (fft-project): record the source-PCM frame the
+    // SPU is about to mix in. Payload format = 12-byte metadata header
+    // (u32 nsamples; u32 freq; u8 stereo; u8 pad[3]) followed by raw
+    // interleaved PCM at `freq` (stereo ? L,R s16 : mono s16).
+    if (m_eventCapture.is_recording() && xap && xap->pcm) {
+        const uint32_t nsamples = static_cast<uint32_t>(xap->nsamples);
+        const uint32_t freq     = static_cast<uint32_t>(xap->freq);
+        const uint8_t  stereo   = xap->stereo ? 1u : 0u;
+        const uint32_t pcm_bytes = nsamples * 2u * (stereo ? 2u : 1u);
+        const uint32_t total = 12u + pcm_bytes;
+        std::vector<uint8_t> buf(total);
+        std::memcpy(buf.data() +  0, &nsamples, 4);
+        std::memcpy(buf.data() +  4, &freq,     4);
+        buf[8] = stereo; buf[9] = 0; buf[10] = 0; buf[11] = 0;
+        std::memcpy(buf.data() + 12, xap->pcm, pcm_bytes);
+        m_eventCapture.emit_xa(buf.data(), total);
+    }
 
     xapGlobal = xap;  // store info for save states
 

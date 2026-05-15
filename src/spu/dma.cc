@@ -31,12 +31,17 @@
 void PCSX::SPU::impl::readDMAMem(uint16_t* mainMem, int size) {
     if (pMixIrq) cbMtx.lock();
 
+    uint16_t* origDest = mainMem;
     for (int i = 0; i < size; i++) {
         *mainMem++ = spuMem[spuAddr >> 1];  // Copy 2 bytes
         spuAddr = (spuAddr + 2) & 0x7ffff;  // Increment SPU address and wrap around
     }
     if (pMixIrq) cbMtx.unlock();
     iSpuAsyncWait = 0;
+    // Event-stream capture (fft-project): record the bytes the SPU just
+    // produced for the DMA reader.
+    m_eventCapture.emit_dma_out(reinterpret_cast<const uint8_t*>(origDest),
+                                static_cast<uint32_t>(size) * 2u);
 }
 
 // to investigate: do sound data updates by writedma affect spu
@@ -58,6 +63,11 @@ void PCSX::SPU::impl::resetCaptureBuffer() {
 
 // Main RAM -> SPU RAM DMA
 void PCSX::SPU::impl::writeDMAMem(uint16_t* mainMem, int size) {
+    // Event-stream capture (fft-project): record the incoming bytes before
+    // the SPU consumes them (mainMem is the source, advanced inside the loop).
+    m_eventCapture.emit_dma_in(reinterpret_cast<const uint8_t*>(mainMem),
+                               static_cast<uint32_t>(size) * 2u);
+
     if (pMixIrq) cbMtx.lock();
 
     for (int i = 0; i < size; i++) {

@@ -1406,6 +1406,57 @@ void PCSX::SPU::impl::setLua(Lua L) {
         },
         -1);
 
+    // ===== SPU event-stream capture (fft-project SPU_EVENT_STREAM_REPLAY_PLAN) =====
+    // Records every input to the SPU (reg writes/reads, DMA, XA) into a
+    // binary log + initial-state snapshot. Replayable offline through
+    // alternative SPU implementations (Mednafen, Godot mixer).
+    //
+    //   PCSX.SPU.startEventCapture(path [, label])
+    //   PCSX.SPU.stopEventCapture()
+    //   PCSX.SPU.isEventCapturing()
+    //   PCSX.SPU.eventCaptureCount()
+    L.declareFunc(
+        "startEventCapture",
+        [this](Lua L) -> int {
+            std::string path  = L.gettop() >= 1 ? L.tostring(1) : "spu_events.bin";
+            std::string label = L.gettop() >= 2 ? L.tostring(2) : "";
+            bool ok = m_eventCapture.start(path, label);
+            if (ok) {
+                // Snapshot the live SPU state so a fresh SPU can be
+                // initialized to this exact moment on replay.
+                m_eventCapture.set_initial_state(
+                    regArea,
+                    reinterpret_cast<const uint8_t*>(spuMem));
+            }
+            L.push(ok);
+            return 1;
+        },
+        -1);
+
+    L.declareFunc(
+        "stopEventCapture",
+        [this](Lua) -> int {
+            m_eventCapture.stop();
+            return 0;
+        },
+        -1);
+
+    L.declareFunc(
+        "isEventCapturing",
+        [this](Lua L) -> int {
+            L.push(m_eventCapture.is_recording());
+            return 1;
+        },
+        -1);
+
+    L.declareFunc(
+        "eventCaptureCount",
+        [this](Lua L) -> int {
+            L.push(lua_Number(m_eventCapture.event_count()));
+            return 1;
+        },
+        -1);
+
     L.pop();       // pop SPU table
     L.pop();       // pop PCSX table
 }

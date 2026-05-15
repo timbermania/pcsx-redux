@@ -70,6 +70,10 @@
 void PCSX::SPU::impl::writeRegister(uint32_t reg, uint16_t val) {
     const uint32_t r = reg & 0xfff;
 
+    // Event-stream capture (fft-project): record every SPU register write
+    // before dispatch. Offset is the SPU-relative 12-bit field (0xc00–0xfff).
+    m_eventCapture.emit_reg_write(static_cast<uint16_t>(r), val);
+
     regArea[(r - 0xc00) >> 1] = val;
 
     // PCSX::PSXSPU_LOGGER::Log("SPU.write, writeRegister %08x: %04x\n", reg, val);
@@ -496,6 +500,14 @@ void PCSX::SPU::impl::writeRegister(uint32_t reg, uint16_t val) {
 ////////////////////////////////////////////////////////////////////////
 
 uint16_t PCSX::SPU::impl::readRegister(uint32_t reg) {
+    uint16_t v = readRegisterInner(reg);
+    // Event-stream capture (fft-project): record the returned value so a
+    // replay through an alternate SPU can verify reads match.
+    m_eventCapture.emit_reg_read(static_cast<uint16_t>(reg & 0xfff), v);
+    return v;
+}
+
+uint16_t PCSX::SPU::impl::readRegisterInner(uint32_t reg) {
     const uint32_t r = reg & 0xfff;
 
     iSpuAsyncWait = 0;
