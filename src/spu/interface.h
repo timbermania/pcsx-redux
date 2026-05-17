@@ -424,7 +424,8 @@ class impl final : public SPUInterface {
 
         void writeVoiceDenseEvent(unsigned ch, uint32_t sampleIndex, int decodedSample, int interpSample, int mixedSample,
                                   uint32_t startAddr, uint32_t loopAddr, uint32_t currAddr,
-                                  int envState, int envVol, int sbPos, uint32_t spos, int s1, int s2) {
+                                  int envState, int envVol, int sbPos, uint32_t spos, int s1, int s2,
+                                  int sincVal, int rawPitch, int actFreq, int usedFreq, int fmod, int noise) {
             if (!recording || !denseTraceFile.is_open()) return;
             if (static_cast<int>(ch) != debugVoice) return;
             denseTraceFile << "{\"kind\":\"voice_dense\""
@@ -442,6 +443,12 @@ class impl final : public SPUInterface {
                            << ",\"spos\":" << spos
                            << ",\"s_1\":" << s1
                            << ",\"s_2\":" << s2
+                           << ",\"sinc\":" << sincVal
+                           << ",\"raw_pitch\":" << rawPitch
+                           << ",\"act_freq\":" << actFreq
+                           << ",\"used_freq\":" << usedFreq
+                           << ",\"fmod\":" << fmod
+                           << ",\"noise\":" << noise
                            << "}\n";
         }
 

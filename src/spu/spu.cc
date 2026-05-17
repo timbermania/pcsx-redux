@@ -749,7 +749,13 @@ void PCSX::SPU::impl::MainThread() {
                                                        pChannel->data.get<PCSX::SPU::Chan::SBPos>().value,
                                                        pChannel->data.get<PCSX::SPU::Chan::spos>().value,
                                                        pChannel->data.get<PCSX::SPU::Chan::s_1>().value,
-                                                       pChannel->data.get<PCSX::SPU::Chan::s_2>().value);
+                                                       pChannel->data.get<PCSX::SPU::Chan::s_2>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::sinc>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::RawPitch>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::ActFreq>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::UsedFreq>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::FMod>().value,
+                                                       pChannel->data.get<PCSX::SPU::Chan::Noise>().value);
                     }
 
                     // SPU Capture: per-voice sample (after ADSR, before volume)
